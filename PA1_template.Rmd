@@ -4,22 +4,245 @@ output:
   html_document:
     keep_md: true
 ---
+*This is the 2nd week project for Reproducible Research*
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+## Load required libraries
+
+```{r load-packages}
+library(tidyverse)
+library(lubridate)
+library(fs)
+library(gt)
+```
 
 
-## Loading and preprocessing the data
+### Download the raw data
+
+```{r load-data}
+# Declare our variables
+data.source <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+archive.name <- "repdata_data_activity.zip"
+file.name <- "activity.csv"
+
+# Get paths to zip file and csv file if available
+zip.paths <- dir_ls(recurse = TRUE,
+                   type = "file",
+                   glob = paste0("*",archive.name))
+file.paths <- dir_ls(recurse = TRUE,
+                    type = "file",
+                    glob = paste0("*",file.name)) 
+                      
+# download, unzip and read in file where valid                      
+if (!length(zip.paths) && !length(file.paths)){
+  download.file(data.source, archive.name, method="curl")
+  unzip(archive.name)
+  activity.raw <- read_csv(file = file.name)
+  } else if (!length(file.paths)) {
+    unzip(archive.name)
+    activity.raw <- read_csv(file = file.name)
+    } else if(!exists("activity.raw")) {
+      activity.raw <- read_csv(file = file.name)
+      } else {}
+
+```
+
+### Process the raw data
+
+```{r process-data}
+# Change date column to a date where valid.
+activity.raw$date <- ymd(activity.raw$date)
+
+```
 
 
+## What is the mean total number of steps taken per day?
 
-## What is mean total number of steps taken per day?
+1. **The total number of steps taken per day for each day.**
 
+```{r change-date}
+# Group data by date and sum the steps by date
+tot.steps <- activity.raw %>%
+  group_by(date) %>%
+  summarise(tot.steps.day = sum(steps, na.rm = TRUE))
+```
+
+2. **The Histogram of the total number of steps taken each day.**
+
+```{r histogram}
+tot.steps %>%
+  ggplot(aes(x = tot.steps.day)) +
+  geom_histogram(binwidth = 1000,
+                 boundary = 0,
+                 colour = "black",
+                 fill = "grey") +
+  scale_x_continuous(labels = scales::label_comma(suffix = "\nsteps")) +
+  labs(y = "Count of total steps per day",
+       x = "Brackets for total steps per day",
+       title = "Histogram of total steps per day")
+```
+
+3. **The mean and median of the total number of steps taken per day**
+
+```{r mean-median}
+# Calculate the mean
+tot.steps.mean <- tot.steps %>%
+  summarise( mean.val = mean(tot.steps.day))
+
+# Calculate the median
+tot.steps %>%
+  summarise(median.val = median(tot.steps.day)) %>%
+  bind_cols(tot.steps.mean) %>%
+  # Send values to the table
+  gt() %>%
+  cols_label(
+    median.val = md("Median"),
+    mean.val = md("Mean")
+  ) %>%
+  fmt_number( columns = vars(median.val, mean.val),
+              decimals = 0,
+              use_seps = TRUE,
+              sep_mark = ",")
+
+
+```
 
 
 ## What is the average daily activity pattern?
 
+1. **Line Plot of the time series**
+
+```{r line-plot}
+# Group by interval and calculate the average number of steps foor each interval
+avg.steps <- activity.raw %>%
+  group_by(interval) %>%
+  summarise(avg.steps.int = mean(steps, na.rm = TRUE))
+
+# Generate the line plot
+avg.steps %>%
+  ggplot( aes(x = interval, y = avg.steps.int) ) +
+  geom_line() +
+  geom_point(colour = "black", alpha = 0.1) +
+  scale_x_continuous(labels = scales::label_comma(suffix = "\ninterval")) +
+  labs(y = "Average steps per interval",
+       x = "Interval",
+       title = "Line Plot of average steps per interval")
+```
+
+2. **The 5-minute interval with the maximum number of steps on average across all the days.**
+
+```{r max-step}
+# Filter for the maximum average steps per interval
+avg.steps %>%
+  filter(avg.steps.int == max(avg.steps.int)) %>%
+  # Send value to the table
+  gt() %>%
+  cols_label(
+    avg.steps.int = md("Maximum Average Step Value "),
+    interval = md("Interval with Maximum Average Step")
+  ) %>%
+  fmt_number( columns = vars(avg.steps.int, interval),
+              decimals = 0,
+              use_seps = TRUE,
+              sep_mark = ",")
+```
 
 
 ## Imputing missing values
 
+1. **The total number of missing values in the database**
 
+```{r count-NA}
+# Count the number of NA's
+activity.raw %>%
+  summarise(na.count = sum(is.na(steps))) %>%
+  gt() %>%
+  cols_label(
+    na.count = md("Count of NA's")
+  ) %>%
+  fmt_number( columns = vars(na.count),
+              decimals = 0,
+              use_seps = TRUE,
+              sep_mark = ",")
+```
+
+2. **Fill in all of the missing values in the dataset.**
+3. **Create a new dataset that is equal to the original dataset but with the missing data filled in**
+
+```{r impute}
+# Use tidy models to impute using k nearest neighbours to impute missing data
+library(recipes)
+imputed.rec <- recipe(date ~ steps + interval,
+                      data = activity.raw) %>%
+  step_knnimpute(steps)
+
+imputed.activity <- prep(imputed.rec) %>%
+  juice()
+```
+
+4. **Make a histogram of the total number of steps taken each day and Calculate and report the mean and median total number of steps taken per day**
+
+```{r hist}
+# Calculate total steps each day
+imp.tot.steps <- imputed.activity %>%
+  group_by(date) %>%
+  summarise(imp.tot.steps.day = sum(steps)) %>%
+  ungroup
+
+# Plot the histogram
+imp.tot.steps %>%
+  ggplot(aes(x = imp.tot.steps.day)) +
+  geom_histogram(binwidth = 1000,
+                 boundary = 0,
+                 colour = "black",
+                 fill = "grey") +
+  scale_x_continuous(labels = scales::label_comma(suffix = "\nsteps")) +
+  labs(y = "Count of total steps per day including imputed",
+       x = "Brackets for total steps per day",
+       title = "Histogram of total steps per day including imputed")
+
+
+imp.tot.steps.mean <- imp.tot.steps %>%
+  summarise(imp.mean.val = mean(imp.tot.steps.day))
+
+imp.tot.steps %>%
+  summarise(imp.median.val = median(imp.tot.steps.day)) %>%
+  bind_cols(imp.tot.steps.mean) %>%
+  gt() %>%
+  cols_label(
+    imp.median.val = md("Imputed Median"),
+    imp.mean.val = md("Imputed Mean")
+  ) %>%
+  fmt_number( columns = vars(imp.median.val, imp.mean.val),
+              decimals = 0,
+              use_seps = TRUE,
+              sep_mark = ",")
+```
+**Ans:** There are changes between the mean and median before and after imputation.
+After imputing the mean shifted more than the median, interestingly the overall distribution shown on the histogram stayed more or less the same. 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r line-plot-wkday-wkend}
+imputed.activity$date <- ymd(imputed.activity$date)
+imputed.activity <- imputed.activity %>% mutate( wkday.wkend = case_when(wday(date) == 1 ~ "weekend",
+                                                     wday(date) == 7 ~ "weekend",
+                                                     TRUE ~ "weekday"))
+imputed.activity %>%
+  group_by(wkday.wkend, interval) %>%
+  summarise(avg.steps.int = mean(steps)) %>%
+  ggplot( aes(x = interval, y = avg.steps.int) ) +
+  geom_line() +
+  geom_point(colour = "black", alpha = 0.1) +
+  facet_wrap(~wkday.wkend, nrow = 2) +
+  scale_x_continuous(labels = scales::label_comma(suffix = "\ninterval")) +
+  labs(y = "Average steps per interval",
+       x = "Interval",
+       title = "Line Plot of average steps per interval")
+```
+
+
+
